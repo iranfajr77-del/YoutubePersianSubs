@@ -6,6 +6,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Color
 import android.graphics.drawable.GradientDrawable
+import android.media.projection.MediaProjectionManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -118,7 +119,7 @@ class MainActivity : Activity() {
         statusCard.addView(overlayButton)
 
         val readStatus = makeText(
-            "خواندن زیرنویس صفحه: هنوز اضافه نشده (مرحله ۴)", 15f, dim
+            "خواندن زیرنویس صفحه: آزمایشی (مرحله ۴)", 15f, textColor
         )
         readStatus.setPadding(0, dp(12), 0, 0)
         statusCard.addView(readStatus)
@@ -141,9 +142,9 @@ class MainActivity : Activity() {
             "۱. برنامه یوتیوب را باز کنید و ویدیوی دلخواه را پخش کنید.\n" +
             "۲. روی ویدیو بزنید و دکمه CC (زیرنویس) را روشن کنید.\n" +
             "۳. زبان زیرنویس را روی انگلیسی (English) بگذارید.\n" +
-            "۴. برنامه Mynisalto را باز کنید و شروع را بزنید.\n" +
-            "۵. دوباره به یوتیوب برگردید تا زیرنویس فارسی را ببینید.\n\n" +
-            "توجه: فعلاً کادر شناور فقط یک متن نمونه نشان می‌دهد. ترجمه واقعی در مراحل ۴ و ۵ اضافه می‌شود.",
+            "۴. برنامه Mynisalto را باز کنید و شروع را بزنید و اجازه ضبط صفحه را بدهید.\n" +
+            "۵. دوباره به یوتیوب برگردید.\n\n" +
+            "توجه: فعلاً کادر شناور همان متن انگلیسی زیرنویس را نشان می‌دهد. ترجمه فارسی در مرحله ۵ اضافه می‌شود.",
             15f, textColor
         )
         steps.setPadding(0, dp(10), 0, 0)
@@ -198,14 +199,34 @@ class MainActivity : Activity() {
         ) {
             requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 1)
         }
-        startForegroundService(Intent(this, OverlayService::class.java))
-        transStatus.text = "ترجمه: کادر نمونه روشن است"
-        transStatus.setTextColor(getColor(R.color.app_green))
-        Toast.makeText(
-            this,
-            "کادر شناور روشن شد. به یوتیوب بروید.",
-            Toast.LENGTH_LONG
-        ).show()
+        val mpm = getSystemService(MediaProjectionManager::class.java)
+        @Suppress("DEPRECATION")
+        startActivityForResult(mpm.createScreenCaptureIntent(), REQ_CAPTURE)
+    }
+
+    @Suppress("DEPRECATION")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode != REQ_CAPTURE) return
+        if (resultCode == RESULT_OK && data != null) {
+            val intent = Intent(this, OverlayService::class.java)
+            intent.putExtra(OverlayService.EXTRA_CODE, resultCode)
+            intent.putExtra(OverlayService.EXTRA_DATA, data)
+            startForegroundService(intent)
+            transStatus.text = "ترجمه: خواندن زیرنویس روشن است"
+            transStatus.setTextColor(getColor(R.color.app_green))
+            Toast.makeText(
+                this,
+                "روشن شد. به یوتیوب بروید.",
+                Toast.LENGTH_LONG
+            ).show()
+        } else {
+            Toast.makeText(
+                this,
+                "اجازه ضبط صفحه داده نشد.",
+                Toast.LENGTH_LONG
+            ).show()
+        }
     }
 
     private fun onStopClicked() {
@@ -214,5 +235,9 @@ class MainActivity : Activity() {
         startService(intent)
         transStatus.text = "ترجمه: متوقف"
         transStatus.setTextColor(getColor(R.color.app_text_dim))
+    }
+
+    companion object {
+        const val REQ_CAPTURE = 100
     }
 }
