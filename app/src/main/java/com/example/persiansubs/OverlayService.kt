@@ -28,6 +28,11 @@ import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
 import android.widget.TextView
+import com.google.mlkit.common.model.DownloadConditions
+import com.google.mlkit.nl.translate.TranslateLanguage
+import com.google.mlkit.nl.translate.Translation
+import com.google.mlkit.nl.translate.Translator
+import com.google.mlkit.nl.translate.TranslatorOptions
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.TextRecognition
 import com.google.mlkit.vision.text.latin.TextRecognizerOptions
@@ -44,6 +49,13 @@ class OverlayService : Service() {
     private var virtualDisplay: VirtualDisplay? = null
     private var reader: ImageReader? = null
     private val recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
+
+    private var translator: Translator? = null
+    private var modelReady = false
+    private var translating = false
+    private var lastSource = ""
+    private var pendingSource: String? = null
+    private val cache = LinkedHashMap<String, String>()
 
     private var screenW = 0
     private var screenH = 0
@@ -90,6 +102,7 @@ class OverlayService : Service() {
         projection = p
         projectionCallback = cb
         showOverlay()
+        setupTranslator()
         setupCapture()
         handler.postDelayed(ticker, 1000)
         return START_NOT_STICKY
@@ -111,10 +124,77 @@ class OverlayService : Service() {
         )
         val n = Notification.Builder(this, CHANNEL_ID)
             .setContentTitle("Mynisalto")
-            .setContentText("در حال خواندن زیرنویس صفحه")
+            .setContentText("در حال ترجمه زیرنویس صفحه")
             .setSmallIcon(android.R.drawable.ic_dialog_info)
             .build()
         startForeground(1, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION)
+    }
+
+    private fun setupTranslator() {
+        val options = TranslatorOptions.Builder()
+            .setSourceLanguage(TranslateLanguage.ENGLISH)
+            .setTargetLanguage(TranslateLanguage.PERSIAN)
+            .build()
+        val t = Translation.getClient(options)
+        translator = t
+        t.downloadModelIfNeeded(DownloadConditions.Builder().build())
+            .addOnSuccessListener {
+                modelReady = true
+            }
+            .addOnFailureListener {
+                if (!stopping) box?.text = "مدل ترجمه آماده نیست. از صفحه اصلی دانلود کنید."
+            }
+    }
+
+    private fun handleText(text: String) {
+        if (text == lastSource) return
+        lastSource = text
+        if (!modelReady) {
+            box?.text = text
+            return
+        }
+        val cached = cache[text]
+        if (cached != null) {
+            box?.text = cached
+            return
+        }
+        if (translating) {
+            pendingSource = text
+            return
+        }
+        translate(text)
+    }
+
+    private fun translate(text: String) {
+        val t = translator ?: return
+        translating = true
+        t.translate(text)
+            .addOnSuccessListener { fa ->
+                if (stopping) return@addOnSuccessListener
+                cache[text] = fa
+                if (cache.size > 200) {
+                    val first = cache.keys.first()
+                    cache.remove(first)
+                }
+                if (text == lastSource) box?.text = fa
+            }
+            .addOnFailureListener {
+                if (stopping) return@addOnFailureListener
+                if (text == lastSource) box?.text = text
+            }
+            .addOnCompleteListener {
+                translating = false
+                val p = pendingSource
+                pendingSource = null
+                if (p != null && !stopping) {
+                    val c = cache[p]
+                    if (c != null) {
+                        if (p == lastSource) box?.text = c
+                    } else {
+                        translate(p)
+                    }
+                }
+            }
     }
 
     @Suppress("DEPRECATION")
@@ -284,10 +364,13 @@ class OverlayService : Service() {
                 val text = lines.joinToString(" ").trim()
                 if (text.isNotEmpty()) {
                     emptyCount = 0
-                    box?.text = text
+                    handleText(text)
                 } else {
                     emptyCount++
-                    if (emptyCount >= 3) box?.text = "…"
+                    if (emptyCount >= 3) {
+                        lastSource = ""
+                        box?.text = "…"
+                    }
                 }
             }
             .addOnCompleteListener {
@@ -333,6 +416,8 @@ class OverlayService : Service() {
         }
         projection = null
         recognizer.close()
+        translator?.close()
+        translator = null
         try {
             box?.let { wm?.removeView(it) }
         } catch (e: Exception) {
