@@ -1,10 +1,13 @@
 package com.example.persiansubs
 
+import android.Manifest
 import android.app.Activity
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.graphics.Color
 import android.graphics.drawable.GradientDrawable
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import android.view.Gravity
@@ -19,6 +22,7 @@ class MainActivity : Activity() {
 
     private lateinit var overlayStatus: TextView
     private lateinit var overlayButton: Button
+    private lateinit var transStatus: TextView
 
     private fun dp(v: Int): Int = (v * resources.displayMetrics.density).toInt()
 
@@ -101,13 +105,7 @@ class MainActivity : Activity() {
 
         // دکمه‌ها
         root.addView(button("شروع", true) { onStartClicked() })
-        root.addView(button("توقف", false) {
-            Toast.makeText(
-                this,
-                "زیرنویس شناور هنوز اضافه نشده است (مرحله ۳).",
-                Toast.LENGTH_SHORT
-            ).show()
-        })
+        root.addView(button("توقف", false) { onStopClicked() })
 
         // وضعیت‌ها
         val statusCard = card()
@@ -134,7 +132,7 @@ class MainActivity : Activity() {
         engineStatus.setPadding(0, dp(8), 0, 0)
         statusCard.addView(engineStatus)
 
-        val transStatus = makeText("ترجمه: متوقف", 15f, dim)
+        transStatus = makeText("ترجمه: متوقف", 15f, dim)
         transStatus.setPadding(0, dp(8), 0, 0)
         statusCard.addView(transStatus)
 
@@ -149,7 +147,7 @@ class MainActivity : Activity() {
             "۳. زبان زیرنویس را روی انگلیسی (English) بگذارید.\n" +
             "۴. برنامه Mynisalto را باز کنید و شروع را بزنید.\n" +
             "۵. دوباره به یوتیوب برگردید تا زیرنویس فارسی را ببینید.\n\n" +
-            "توجه: مراحل ۴ و ۵ بعد از اضافه شدن زیرنویس شناور (مرحله ۳) کار می‌کنند.",
+            "توجه: فعلاً کادر شناور فقط یک متن نمونه نشان می‌دهد. ترجمه واقعی در مراحل ۴ و ۵ اضافه می‌شود.",
             15f, textColor
         )
         steps.setPadding(0, dp(10), 0, 0)
@@ -159,50 +157,4 @@ class MainActivity : Activity() {
 
         // تنظیمات
         root.addView(button("تنظیمات", false) {
-            startActivity(Intent(this, SettingsActivity::class.java))
-        })
-    }
-
-    override fun onResume() {
-        super.onResume()
-        refreshStatus()
-    }
-
-    private fun refreshStatus() {
-        val granted = Settings.canDrawOverlays(this)
-        if (granted) {
-            overlayStatus.text = "مجوز نمایش روی برنامه‌ها: فعال ✅"
-            overlayStatus.setTextColor(getColor(R.color.app_green))
-            overlayButton.visibility = View.GONE
-        } else {
-            overlayStatus.text = "مجوز نمایش روی برنامه‌ها: غیرفعال ❌"
-            overlayStatus.setTextColor(Color.parseColor("#FF6B6B"))
-            overlayButton.visibility = View.VISIBLE
-        }
-    }
-
-    private fun openOverlaySettings() {
-        val intent = Intent(
-            Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-            Uri.parse("package:$packageName")
-        )
-        startActivity(intent)
-    }
-
-    private fun onStartClicked() {
-        if (!Settings.canDrawOverlays(this)) {
-            Toast.makeText(
-                this,
-                "اول مجوز نمایش روی برنامه‌ها را فعال کنید.",
-                Toast.LENGTH_LONG
-            ).show()
-            openOverlaySettings()
-        } else {
-            Toast.makeText(
-                this,
-                "مجوز آماده است. زیرنویس شناور در مرحله ۳ اضافه می‌شود.",
-                Toast.LENGTH_LONG
-            ).show()
-        }
-    }
-}
+            startActivity(Intent(this, SettingsAc
