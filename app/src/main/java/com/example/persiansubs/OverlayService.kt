@@ -6,33 +6,102 @@ import android.app.NotificationManager
 import android.app.Service
 import android.content.Intent
 import android.content.pm.ServiceInfo
+import android.content.res.Configuration
+import android.graphics.Bitmap
 import android.graphics.Color
 import android.graphics.PixelFormat
+import android.graphics.Rect
 import android.graphics.drawable.GradientDrawable
+import android.hardware.display.DisplayManager
+import android.hardware.display.VirtualDisplay
+import android.media.ImageReader
+import android.media.projection.MediaProjection
+import android.media.projection.MediaProjectionManager
 import android.os.Build
+import android.os.Handler
 import android.os.IBinder
+import android.os.Looper
 import android.provider.Settings
+import android.util.DisplayMetrics
 import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
 import android.widget.TextView
+import com.google.mlkit.vision.common.InputImage
+import com.google.mlkit.vision.text.TextRecognition
+import com.google.mlkit.vision.text.latin.TextRecognizerOptions
 
 class OverlayService : Service() {
 
+    private val handler = Handler(Looper.getMainLooper())
     private var wm: WindowManager? = null
     private var box: TextView? = null
+    private var boxParams: WindowManager.LayoutParams? = null
+
+    private var projection: MediaProjection? = null
+    private var projectionCallback: MediaProjection.Callback? = null
+    private var virtualDisplay: VirtualDisplay? = null
+    private var reader: ImageReader? = null
+    private val recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
+
+    private var screenW = 0
+    private var screenH = 0
+    private var screenDpi = 0
+    private var busy = false
+    private var emptyCount = 0
+    private var stopping = false
+
+    private val ticker = object : Runnable {
+        override fun run() {
+            if (stopping) return
+            captureAndRead()
+            handler.postDelayed(this, 1000)
+        }
+    }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        if (intent?.action == ACTION_STOP || !Settings.canDrawOverlays(this)) {
+        if (intent == null || intent.action == ACTION_STOP) {
             stopSelf()
             return START_NOT_STICKY
         }
         startAsForeground()
-        if (box == null) showOverlay()
-        return START_STICKY
+        if (projection != null) return START_NOT_STICKY
+        if (!Settings.canDrawOverlays(this)) {
+            stopSelf()
+            return START_NOT_STICKY
+        }
+        val code = intent.getIntExtra(EXTRA_CODE, 0)
+        val data = readData(intent)
+        if (data == null) {
+            stopSelf()
+            return START_NOT_STICKY
+        }
+        val mpm = getSystemService(MediaProjectionManager::class.java)
+        val p = mpm.getMediaProjection(code, data)
+        val cb = object : MediaProjection.Callback() {
+            override fun onStop() {
+                handler.post { stopSelf() }
+            }
+        }
+        p.registerCallback(cb, handler)
+        projection = p
+        projectionCallback = cb
+        showOverlay()
+        setupCapture()
+        handler.postDelayed(ticker, 1000)
+        return START_NOT_STICKY
+    }
+
+    @Suppress("DEPRECATION")
+    private fun readData(intent: Intent): Intent? {
+        return if (Build.VERSION.SDK_INT >= 33) {
+            intent.getParcelableExtra(EXTRA_DATA, Intent::class.java)
+        } else {
+            intent.getParcelableExtra<Intent>(EXTRA_DATA)
+        }
     }
 
     private fun startAsForeground() {
@@ -42,28 +111,43 @@ class OverlayService : Service() {
         )
         val n = Notification.Builder(this, CHANNEL_ID)
             .setContentTitle("Mynisalto")
-            .setContentText("زیرنویس شناور فعال است")
+            .setContentText("در حال خواندن زیرنویس صفحه")
             .setSmallIcon(android.R.drawable.ic_dialog_info)
             .build()
-        if (Build.VERSION.SDK_INT >= 34) {
-            startForeground(1, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
+        startForeground(1, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION)
+    }
+
+    @Suppress("DEPRECATION")
+    private fun readScreen() {
+        val dm = DisplayMetrics()
+        val windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
+        windowManager.defaultDisplay.getRealMetrics(dm)
+        screenW = dm.widthPixels
+        screenH = dm.heightPixels
+        screenDpi = dm.densityDpi
+    }
+
+    private fun defaultY(): Int {
+        return if (screenH > screenW) {
+            (screenW * 9 / 16 + screenH * 0.08).toInt()
         } else {
-            startForeground(1, n)
+            (screenH * 0.08).toInt()
         }
     }
 
     private fun showOverlay() {
+        readScreen()
         val prefs = Prefs(this)
         val windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
         wm = windowManager
 
         val density = resources.displayMetrics.density
         val tv = TextView(this)
-        tv.text = "این یک نمونه زیرنویس فارسی است"
+        tv.text = "در حال خواندن زیرنویس…"
         tv.textSize = prefs.textSize.toFloat()
         tv.setTextColor(Color.WHITE)
         tv.gravity = Gravity.CENTER
-        tv.textDirection = View.TEXT_DIRECTION_RTL
+        tv.textDirection = View.TEXT_DIRECTION_FIRST_STRONG
         val pad = (10 * density).toInt()
         tv.setPadding(pad, pad, pad, pad)
 
@@ -73,14 +157,14 @@ class OverlayService : Service() {
         tv.background = bg
 
         val params = WindowManager.LayoutParams(
-            (resources.displayMetrics.widthPixels * 0.9).toInt(),
+            (screenW * 0.9).toInt(),
             WindowManager.LayoutParams.WRAP_CONTENT,
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
             PixelFormat.TRANSLUCENT
         )
         params.gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
-        params.y = (150 * density).toInt()
+        params.y = defaultY()
 
         var startY = 0
         var touchY = 0f
@@ -100,10 +184,159 @@ class OverlayService : Service() {
 
         windowManager.addView(tv, params)
         box = tv
+        boxParams = params
+    }
+
+    private fun setupCapture() {
+        val p = projection ?: return
+        readScreen()
+        val oldReader = reader
+        val r = ImageReader.newInstance(screenW, screenH, PixelFormat.RGBA_8888, 2)
+        reader = r
+        val vd = virtualDisplay
+        if (vd == null) {
+            virtualDisplay = p.createVirtualDisplay(
+                "mynisalto",
+                screenW,
+                screenH,
+                screenDpi,
+                DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
+                r.surface,
+                null,
+                handler
+            )
+        } else {
+            vd.resize(screenW, screenH, screenDpi)
+            vd.surface = r.surface
+        }
+        oldReader?.close()
+    }
+
+    private fun overlayRect(): Rect? {
+        val tv = box ?: return null
+        val loc = IntArray(2)
+        tv.getLocationOnScreen(loc)
+        val rect = Rect(loc[0], loc[1], loc[0] + tv.width, loc[1] + tv.height)
+        rect.inset(-12, -12)
+        return rect
+    }
+
+    private fun captureAndRead() {
+        if (busy) return
+        val r = reader ?: return
+        val image = try {
+            r.acquireLatestImage()
+        } catch (e: Exception) {
+            null
+        }
+        if (image == null) return
+
+        val w = image.width
+        val h = image.height
+        val top: Int
+        val bottom: Int
+        if (h > w) {
+            top = (h * 0.03).toInt()
+            bottom = minOf(h, w * 9 / 16 + (h * 0.06).toInt())
+        } else {
+            top = (h * 0.55).toInt()
+            bottom = (h * 0.95).toInt()
+        }
+        val bandH = bottom - top
+        if (bandH <= 20) {
+            image.close()
+            return
+        }
+
+        val crop: Bitmap
+        try {
+            val plane = image.planes[0]
+            val pixelStride = plane.pixelStride
+            val rowPadding = plane.rowStride - pixelStride * w
+            val full = Bitmap.createBitmap(
+                w + rowPadding / pixelStride, h, Bitmap.Config.ARGB_8888
+            )
+            full.copyPixelsFromBuffer(plane.buffer)
+            crop = Bitmap.createBitmap(full, 0, top, w, bandH)
+            full.recycle()
+        } catch (e: Exception) {
+            image.close()
+            return
+        }
+        image.close()
+
+        busy = true
+        recognizer.process(InputImage.fromBitmap(crop, 0))
+            .addOnSuccessListener { result ->
+                val ov = overlayRect()
+                val lines = ArrayList<String>()
+                for (block in result.textBlocks) {
+                    for (line in block.lines) {
+                        val bb = line.boundingBox
+                        if (bb != null && ov != null) {
+                            val rr = Rect(bb)
+                            rr.offset(0, top)
+                            if (Rect.intersects(rr, ov)) continue
+                        }
+                        lines.add(line.text)
+                    }
+                }
+                val text = lines.joinToString(" ").trim()
+                if (text.isNotEmpty()) {
+                    emptyCount = 0
+                    box?.text = text
+                } else {
+                    emptyCount++
+                    if (emptyCount >= 3) box?.text = "…"
+                }
+            }
+            .addOnCompleteListener {
+                busy = false
+                crop.recycle()
+            }
+    }
+
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        if (projection == null || stopping) return
+        handler.postDelayed({
+            if (stopping) return@postDelayed
+            setupCapture()
+            val p = boxParams
+            val b = box
+            if (p != null && b != null) {
+                p.width = (screenW * 0.9).toInt()
+                p.y = defaultY()
+                wm?.updateViewLayout(b, p)
+            }
+        }, 400)
     }
 
     override fun onDestroy() {
-        box?.let { wm?.removeView(it) }
+        stopping = true
+        handler.removeCallbacksAndMessages(null)
+        try {
+            virtualDisplay?.release()
+        } catch (e: Exception) {
+        }
+        virtualDisplay = null
+        reader?.close()
+        reader = null
+        val p = projection
+        val cb = projectionCallback
+        if (p != null) {
+            if (cb != null) p.unregisterCallback(cb)
+            try {
+                p.stop()
+            } catch (e: Exception) {
+            }
+        }
+        projection = null
+        recognizer.close()
+        try {
+            box?.let { wm?.removeView(it) }
+        } catch (e: Exception) {
+        }
         box = null
         super.onDestroy()
     }
@@ -111,5 +344,7 @@ class OverlayService : Service() {
     companion object {
         const val ACTION_STOP = "com.example.persiansubs.STOP"
         const val CHANNEL_ID = "overlay"
+        const val EXTRA_CODE = "code"
+        const val EXTRA_DATA = "data"
     }
 }
