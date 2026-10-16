@@ -99,15 +99,12 @@ class MainActivity : Activity() {
             return b
         }
 
-        // عنوان
         root.addView(makeText("Mynisalto", 30f, green))
         root.addView(makeText("زیرنویس فارسی یوتیوب", 16f, dim))
 
-        // دکمه‌ها
         root.addView(button("شروع", true) { onStartClicked() })
         root.addView(button("توقف", false) { onStopClicked() })
 
-        // وضعیت‌ها
         val statusCard = card()
         statusCard.addView(makeText("وضعیت", 18f, green))
 
@@ -138,7 +135,6 @@ class MainActivity : Activity() {
 
         root.addView(statusCard)
 
-        // راهنما
         val helpCard = card()
         helpCard.addView(makeText("طرز استفاده", 18f, green))
         val steps = makeText(
@@ -155,6 +151,68 @@ class MainActivity : Activity() {
         helpCard.addView(steps)
         root.addView(helpCard)
 
-        // تنظیمات
         root.addView(button("تنظیمات", false) {
-            startActivity(Intent(this, SettingsAc
+            startActivity(Intent(this, SettingsActivity::class.java))
+        })
+    }
+
+    override fun onResume() {
+        super.onResume()
+        refreshStatus()
+    }
+
+    private fun refreshStatus() {
+        val granted = Settings.canDrawOverlays(this)
+        if (granted) {
+            overlayStatus.text = "مجوز نمایش روی برنامه‌ها: فعال ✅"
+            overlayStatus.setTextColor(getColor(R.color.app_green))
+            overlayButton.visibility = View.GONE
+        } else {
+            overlayStatus.text = "مجوز نمایش روی برنامه‌ها: غیرفعال ❌"
+            overlayStatus.setTextColor(Color.parseColor("#FF6B6B"))
+            overlayButton.visibility = View.VISIBLE
+        }
+    }
+
+    private fun openOverlaySettings() {
+        val intent = Intent(
+            Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+            Uri.parse("package:$packageName")
+        )
+        startActivity(intent)
+    }
+
+    private fun onStartClicked() {
+        if (!Settings.canDrawOverlays(this)) {
+            Toast.makeText(
+                this,
+                "اول مجوز نمایش روی برنامه‌ها را فعال کنید.",
+                Toast.LENGTH_LONG
+            ).show()
+            openOverlaySettings()
+            return
+        }
+        if (Build.VERSION.SDK_INT >= 33 &&
+            checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)
+            != PackageManager.PERMISSION_GRANTED
+        ) {
+            requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 1)
+        }
+        startForegroundService(Intent(this, OverlayService::class.java))
+        transStatus.text = "ترجمه: کادر نمونه روشن است"
+        transStatus.setTextColor(getColor(R.color.app_green))
+        Toast.makeText(
+            this,
+            "کادر شناور روشن شد. به یوتیوب بروید.",
+            Toast.LENGTH_LONG
+        ).show()
+    }
+
+    private fun onStopClicked() {
+        val intent = Intent(this, OverlayService::class.java)
+        intent.action = OverlayService.ACTION_STOP
+        startService(intent)
+        transStatus.text = "ترجمه: متوقف"
+        transStatus.setTextColor(getColor(R.color.app_text_dim))
+    }
+}
