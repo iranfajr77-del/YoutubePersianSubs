@@ -18,12 +18,21 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
+import com.google.mlkit.common.model.DownloadConditions
+import com.google.mlkit.common.model.RemoteModelManager
+import com.google.mlkit.nl.translate.TranslateLanguage
+import com.google.mlkit.nl.translate.TranslateRemoteModel
+import com.google.mlkit.nl.translate.Translation
+import com.google.mlkit.nl.translate.TranslatorOptions
 
 class MainActivity : Activity() {
 
     private lateinit var overlayStatus: TextView
     private lateinit var overlayButton: Button
     private lateinit var transStatus: TextView
+    private lateinit var engineStatus: TextView
+    private lateinit var downloadButton: Button
+    private var downloading = false
 
     private fun dp(v: Int): Int = (v * resources.displayMetrics.density).toInt()
 
@@ -124,11 +133,14 @@ class MainActivity : Activity() {
         readStatus.setPadding(0, dp(12), 0, 0)
         statusCard.addView(readStatus)
 
-        val engineStatus = makeText(
-            "موتور ترجمه: هنوز آماده نیست (مرحله ۵)", 15f, dim
-        )
+        engineStatus = makeText("موتور ترجمه: در حال بررسی…", 15f, dim)
         engineStatus.setPadding(0, dp(8), 0, 0)
         statusCard.addView(engineStatus)
+
+        downloadButton = button("دانلود مدل ترجمه (یک بار، حدود ۶۰ مگابایت)", false) {
+            downloadModel()
+        }
+        statusCard.addView(downloadButton)
 
         transStatus = makeText("ترجمه: متوقف", 15f, dim)
         transStatus.setPadding(0, dp(8), 0, 0)
@@ -139,12 +151,12 @@ class MainActivity : Activity() {
         val helpCard = card()
         helpCard.addView(makeText("طرز استفاده", 18f, green))
         val steps = makeText(
-            "۱. برنامه یوتیوب را باز کنید و ویدیوی دلخواه را پخش کنید.\n" +
-            "۲. روی ویدیو بزنید و دکمه CC (زیرنویس) را روشن کنید.\n" +
-            "۳. زبان زیرنویس را روی انگلیسی (English) بگذارید.\n" +
+            "۱. اول یک بار مدل ترجمه را دانلود کنید.\n" +
+            "۲. برنامه یوتیوب را باز کنید و ویدیوی دلخواه را پخش کنید.\n" +
+            "۳. دکمه CC (زیرنویس) را روشن کنید و زبان را روی English بگذارید.\n" +
             "۴. برنامه Mynisalto را باز کنید و شروع را بزنید و اجازه ضبط صفحه را بدهید.\n" +
             "۵. دوباره به یوتیوب برگردید.\n\n" +
-            "توجه: فعلاً کادر شناور همان متن انگلیسی زیرنویس را نشان می‌دهد. ترجمه فارسی در مرحله ۵ اضافه می‌شود.",
+            "توجه: فعلاً کادر شناور هنوز متن انگلیسی را نشان می‌دهد. ترجمه فارسی در قدم بعدی وصل می‌شود.",
             15f, textColor
         )
         steps.setPadding(0, dp(10), 0, 0)
@@ -160,6 +172,7 @@ class MainActivity : Activity() {
     override fun onResume() {
         super.onResume()
         refreshStatus()
+        refreshModelStatus()
     }
 
     private fun refreshStatus() {
@@ -173,6 +186,65 @@ class MainActivity : Activity() {
             overlayStatus.setTextColor(Color.parseColor("#FF6B6B"))
             overlayButton.visibility = View.VISIBLE
         }
+    }
+
+    private fun setModelReady(ready: Boolean) {
+        if (ready) {
+            engineStatus.text = "موتور ترجمه: آماده ✅"
+            engineStatus.setTextColor(getColor(R.color.app_green))
+            downloadButton.visibility = View.GONE
+        } else {
+            engineStatus.text = "موتور ترجمه: مدل دانلود نشده ❌"
+            engineStatus.setTextColor(Color.parseColor("#FF6B6B"))
+            downloadButton.visibility = View.VISIBLE
+        }
+    }
+
+    private fun refreshModelStatus() {
+        if (downloading) return
+        RemoteModelManager.getInstance()
+            .getDownloadedModels(TranslateRemoteModel::class.java)
+            .addOnSuccessListener { models ->
+                val ready = models.any { it.language == TranslateLanguage.PERSIAN }
+                setModelReady(ready)
+            }
+            .addOnFailureListener {
+                setModelReady(false)
+            }
+    }
+
+    private fun downloadModel() {
+        if (downloading) return
+        downloading = true
+        downloadButton.isEnabled = false
+        engineStatus.text = "موتور ترجمه: در حال دانلود… لطفاً صبر کنید و برنامه را نبندید"
+        engineStatus.setTextColor(getColor(R.color.app_text))
+
+        val options = TranslatorOptions.Builder()
+            .setSourceLanguage(TranslateLanguage.ENGLISH)
+            .setTargetLanguage(TranslateLanguage.PERSIAN)
+            .build()
+        val translator = Translation.getClient(options)
+        translator.downloadModelIfNeeded(DownloadConditions.Builder().build())
+            .addOnSuccessListener {
+                downloading = false
+                translator.close()
+                downloadButton.isEnabled = true
+                setModelReady(true)
+                Toast.makeText(this, "مدل ترجمه آماده شد.", Toast.LENGTH_LONG).show()
+            }
+            .addOnFailureListener { e ->
+                downloading = false
+                translator.close()
+                downloadButton.isEnabled = true
+                setModelReady(false)
+                engineStatus.text = "دانلود ناموفق بود. اینترنت را چک کنید و دوباره بزنید."
+                Toast.makeText(
+                    this,
+                    "خطا: " + (e.message ?: "نامشخص"),
+                    Toast.LENGTH_LONG
+                ).show()
+            }
     }
 
     private fun openOverlaySettings() {
