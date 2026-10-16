@@ -1,35 +1,208 @@
 package com.example.persiansubs
 
 import android.app.Activity
+import android.content.Intent
+import android.graphics.Color
+import android.graphics.drawable.GradientDrawable
+import android.net.Uri
 import android.os.Bundle
+import android.provider.Settings
 import android.view.Gravity
 import android.view.View
+import android.widget.Button
 import android.widget.LinearLayout
+import android.widget.ScrollView
 import android.widget.TextView
+import android.widget.Toast
 
 class MainActivity : Activity() {
+
+    private lateinit var overlayStatus: TextView
+    private lateinit var overlayButton: Button
+
+    private fun dp(v: Int): Int = (v * resources.displayMetrics.density).toInt()
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        val layout = LinearLayout(this)
-        layout.orientation = LinearLayout.VERTICAL
-        layout.gravity = Gravity.CENTER
-        layout.layoutDirection = View.LAYOUT_DIRECTION_RTL
-        layout.setPadding(48, 48, 48, 48)
+        val green = getColor(R.color.app_green)
+        val black = getColor(R.color.app_black)
+        val surface = getColor(R.color.app_surface)
+        val textColor = getColor(R.color.app_text)
+        val dim = getColor(R.color.app_text_dim)
 
-        val title = TextView(this)
-        title.text = "زیرنویس فارسی یوتیوب"
-        title.textSize = 26f
-        title.gravity = Gravity.CENTER
+        val root = LinearLayout(this)
+        root.orientation = LinearLayout.VERTICAL
+        root.layoutDirection = View.LAYOUT_DIRECTION_RTL
+        root.setPadding(dp(20), dp(28), dp(20), dp(32))
 
-        val message = TextView(this)
-        message.text = "نسخه آزمایشی: اگر این صفحه را می‌بینید، ساخت و نصب برنامه موفق بوده است."
-        message.textSize = 18f
-        message.gravity = Gravity.CENTER
-        message.setPadding(0, 32, 0, 0)
+        val scroll = ScrollView(this)
+        scroll.setBackgroundColor(black)
+        scroll.addView(root)
+        setContentView(scroll)
 
-        layout.addView(title)
-        layout.addView(message)
-        setContentView(layout)
+        fun makeText(t: String, size: Float, color: Int): TextView {
+            val tv = TextView(this)
+            tv.text = t
+            tv.textSize = size
+            tv.setTextColor(color)
+            tv.textDirection = View.TEXT_DIRECTION_RTL
+            tv.gravity = Gravity.START
+            return tv
+        }
+
+        fun card(): LinearLayout {
+            val c = LinearLayout(this)
+            c.orientation = LinearLayout.VERTICAL
+            val bg = GradientDrawable()
+            bg.setColor(surface)
+            bg.cornerRadius = dp(16).toFloat()
+            bg.setStroke(dp(1), getColor(R.color.app_green_dark))
+            c.background = bg
+            c.setPadding(dp(16), dp(14), dp(16), dp(14))
+            val lp = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            )
+            lp.topMargin = dp(14)
+            c.layoutParams = lp
+            return c
+        }
+
+        fun button(t: String, filled: Boolean, onClick: () -> Unit): Button {
+            val b = Button(this)
+            b.text = t
+            b.textSize = 17f
+            b.isAllCaps = false
+            val bg = GradientDrawable()
+            bg.cornerRadius = dp(14).toFloat()
+            if (filled) {
+                bg.setColor(green)
+                b.setTextColor(Color.BLACK)
+            } else {
+                bg.setColor(Color.TRANSPARENT)
+                bg.setStroke(dp(1), green)
+                b.setTextColor(green)
+            }
+            b.background = bg
+            val lp = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                dp(54)
+            )
+            lp.topMargin = dp(12)
+            b.layoutParams = lp
+            b.setOnClickListener { onClick() }
+            return b
+        }
+
+        // عنوان
+        root.addView(makeText("Mynisalto", 30f, green))
+        root.addView(makeText("زیرنویس فارسی یوتیوب", 16f, dim))
+
+        // دکمه‌ها
+        root.addView(button("شروع", true) { onStartClicked() })
+        root.addView(button("توقف", false) {
+            Toast.makeText(
+                this,
+                "زیرنویس شناور هنوز اضافه نشده است (مرحله ۳).",
+                Toast.LENGTH_SHORT
+            ).show()
+        })
+
+        // وضعیت‌ها
+        val statusCard = card()
+        statusCard.addView(makeText("وضعیت", 18f, green))
+
+        overlayStatus = makeText("", 15f, textColor)
+        overlayStatus.setPadding(0, dp(10), 0, 0)
+        statusCard.addView(overlayStatus)
+
+        overlayButton = button("فعال کردن مجوز نمایش روی برنامه‌ها", false) {
+            openOverlaySettings()
+        }
+        statusCard.addView(overlayButton)
+
+        val readStatus = makeText(
+            "خواندن زیرنویس صفحه: هنوز اضافه نشده (مرحله ۴)", 15f, dim
+        )
+        readStatus.setPadding(0, dp(12), 0, 0)
+        statusCard.addView(readStatus)
+
+        val engineStatus = makeText(
+            "موتور ترجمه: هنوز آماده نیست (مرحله ۵)", 15f, dim
+        )
+        engineStatus.setPadding(0, dp(8), 0, 0)
+        statusCard.addView(engineStatus)
+
+        val transStatus = makeText("ترجمه: متوقف", 15f, dim)
+        transStatus.setPadding(0, dp(8), 0, 0)
+        statusCard.addView(transStatus)
+
+        root.addView(statusCard)
+
+        // راهنما
+        val helpCard = card()
+        helpCard.addView(makeText("طرز استفاده", 18f, green))
+        val steps = makeText(
+            "۱. برنامه یوتیوب را باز کنید و ویدیوی دلخواه را پخش کنید.\n" +
+            "۲. روی ویدیو بزنید و دکمه CC (زیرنویس) را روشن کنید.\n" +
+            "۳. زبان زیرنویس را روی انگلیسی (English) بگذارید.\n" +
+            "۴. برنامه Mynisalto را باز کنید و شروع را بزنید.\n" +
+            "۵. دوباره به یوتیوب برگردید تا زیرنویس فارسی را ببینید.\n\n" +
+            "توجه: مراحل ۴ و ۵ بعد از اضافه شدن زیرنویس شناور (مرحله ۳) کار می‌کنند.",
+            15f, textColor
+        )
+        steps.setPadding(0, dp(10), 0, 0)
+        steps.setLineSpacing(0f, 1.3f)
+        helpCard.addView(steps)
+        root.addView(helpCard)
+
+        // تنظیمات
+        root.addView(button("تنظیمات", false) {
+            startActivity(Intent(this, SettingsActivity::class.java))
+        })
+    }
+
+    override fun onResume() {
+        super.onResume()
+        refreshStatus()
+    }
+
+    private fun refreshStatus() {
+        val granted = Settings.canDrawOverlays(this)
+        if (granted) {
+            overlayStatus.text = "مجوز نمایش روی برنامه‌ها: فعال ✅"
+            overlayStatus.setTextColor(getColor(R.color.app_green))
+            overlayButton.visibility = View.GONE
+        } else {
+            overlayStatus.text = "مجوز نمایش روی برنامه‌ها: غیرفعال ❌"
+            overlayStatus.setTextColor(Color.parseColor("#FF6B6B"))
+            overlayButton.visibility = View.VISIBLE
+        }
+    }
+
+    private fun openOverlaySettings() {
+        val intent = Intent(
+            Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+            Uri.parse("package:$packageName")
+        )
+        startActivity(intent)
+    }
+
+    private fun onStartClicked() {
+        if (!Settings.canDrawOverlays(this)) {
+            Toast.makeText(
+                this,
+                "اول مجوز نمایش روی برنامه‌ها را فعال کنید.",
+                Toast.LENGTH_LONG
+            ).show()
+            openOverlaySettings()
+        } else {
+            Toast.makeText(
+                this,
+                "مجوز آماده است. زیرنویس شناور در مرحله ۳ اضافه می‌شود.",
+                Toast.LENGTH_LONG
+            ).show()
+        }
     }
 }
