@@ -1,19 +1,16 @@
 package com.example.persiansubs
 
 import android.app.Activity
-import android.app.AlertDialog
 import android.graphics.Color
+import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
 import android.view.Gravity
 import android.view.View
-import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.SeekBar
-import android.widget.Switch
 import android.widget.TextView
-import android.widget.Toast
 
 class SettingsActivity : Activity() {
 
@@ -31,11 +28,16 @@ class SettingsActivity : Activity() {
         val surface = getColor(R.color.app_surface)
         val textColor = getColor(R.color.app_text)
         val dim = getColor(R.color.app_text_dim)
+        val greenDark = getColor(R.color.app_green_dark)
+
+        window.statusBarColor = black
+        window.navigationBarColor = black
 
         val root = LinearLayout(this)
         root.orientation = LinearLayout.VERTICAL
         root.layoutDirection = View.LAYOUT_DIRECTION_RTL
         root.setPadding(dp(20), dp(24), dp(20), dp(32))
+        root.setBackgroundColor(black)
 
         val scroll = ScrollView(this)
         scroll.setBackgroundColor(black)
@@ -58,7 +60,7 @@ class SettingsActivity : Activity() {
             val bg = GradientDrawable()
             bg.setColor(surface)
             bg.cornerRadius = dp(16).toFloat()
-            bg.setStroke(dp(1), getColor(R.color.app_green_dark))
+            bg.setStroke(dp(1), greenDark)
             c.background = bg
             c.setPadding(dp(16), dp(14), dp(16), dp(14))
             val lp = LinearLayout.LayoutParams(
@@ -75,39 +77,20 @@ class SettingsActivity : Activity() {
             sb.thumbTintList = android.content.res.ColorStateList.valueOf(green)
         }
 
-        fun button(t: String, filled: Boolean, onClick: () -> Unit): Button {
-            val b = Button(this)
-            b.text = t
-            b.textSize = 16f
-            b.isAllCaps = false
-            val bg = GradientDrawable()
-            bg.cornerRadius = dp(14).toFloat()
-            if (filled) {
-                bg.setColor(green)
-                b.setTextColor(Color.BLACK)
-            } else {
-                bg.setColor(Color.TRANSPARENT)
-                bg.setStroke(dp(1), green)
-                b.setTextColor(green)
-            }
-            b.background = bg
-            val lp = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                dp(50)
-            )
-            lp.topMargin = dp(10)
-            b.layoutParams = lp
-            b.setOnClickListener { onClick() }
-            return b
-        }
-
         fun updatePreview() {
             preview.textSize = prefs.textSize.toFloat()
+            preview.setTextColor(prefs.textColor)
             val alpha = (prefs.bgOpacity * 255) / 100
-            preview.setBackgroundColor(Color.argb(alpha, 0, 0, 0))
+            val bg = GradientDrawable()
+            bg.setColor(Color.argb(alpha, 0, 0, 0))
+            bg.cornerRadius = dp(12).toFloat()
+            preview.background = bg
         }
 
-        root.addView(makeText("تنظیمات", 26f, green))
+        // عنوان
+        val title = makeText("⚙  تنظیمات", 26f, green)
+        title.typeface = Typeface.DEFAULT_BOLD
+        root.addView(title)
 
         // پیش‌نمایش
         val previewCard = card()
@@ -115,12 +98,18 @@ class SettingsActivity : Activity() {
         preview = makeText("این یک نمونه زیرنویس فارسی است", 20f, Color.WHITE)
         preview.gravity = Gravity.CENTER
         preview.setPadding(dp(12), dp(12), dp(12), dp(12))
+        val plp = LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT,
+            LinearLayout.LayoutParams.WRAP_CONTENT
+        )
+        plp.topMargin = dp(10)
+        preview.layoutParams = plp
         previewCard.addView(preview)
         root.addView(previewCard)
 
-        // اندازه متن
+        // اندازه زیرنویس
         val sizeCard = card()
-        val sizeLabel = makeText("اندازه متن: ${prefs.textSize}", 16f, textColor)
+        val sizeLabel = makeText("اندازه زیرنویس: ${prefs.textSize}", 16f, textColor)
         val sizeBar = SeekBar(this)
         sizeBar.max = 22
         sizeBar.progress = prefs.textSize - 14
@@ -128,7 +117,7 @@ class SettingsActivity : Activity() {
         sizeBar.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(s: SeekBar?, p: Int, fromUser: Boolean) {
                 prefs.textSize = p + 14
-                sizeLabel.text = "اندازه متن: ${p + 14}"
+                sizeLabel.text = "اندازه زیرنویس: ${p + 14}"
                 updatePreview()
             }
             override fun onStartTrackingTouch(s: SeekBar?) {}
@@ -158,62 +147,159 @@ class SettingsActivity : Activity() {
         opCard.addView(opBar)
         root.addView(opCard)
 
-        // حالت ترجمه
-        val modeCard = card()
-        val modeDesc = makeText("", 13f, dim)
-        fun updateModeText(auto: Boolean) {
-            modeDesc.text = if (auto) {
-                "خودکار: هر زیرنویس جدید خودبه‌خود ترجمه می‌شود."
-            } else {
-                "دستی: فقط با زدن دکمه ترجمه انجام می‌شود."
+        // رنگ زیرنویس
+        val colorCard = card()
+        colorCard.addView(makeText("رنگ زیرنویس", 16f, textColor))
+
+        val colorNames = listOf("سفید", "سبز", "زرد", "آبی")
+        val colorValues = listOf(
+            Color.WHITE,
+            Color.parseColor("#39FF14"),
+            Color.parseColor("#FFEB3B"),
+            Color.parseColor("#4FC3F7")
+        )
+        val chips = ArrayList<TextView>()
+
+        fun refreshChips() {
+            for (i in chips.indices) {
+                val selected = prefs.textColor == colorValues[i]
+                val bg = GradientDrawable()
+                bg.setColor(colorValues[i])
+                bg.cornerRadius = dp(12).toFloat()
+                if (selected) {
+                    bg.setStroke(dp(3), Color.parseColor("#FF9800"))
+                }
+                chips[i].background = bg
+                chips[i].text = if (selected) "✓ ${colorNames[i]}" else colorNames[i]
             }
         }
-        val modeSwitch = Switch(this)
-        modeSwitch.text = "ترجمه خودکار"
-        modeSwitch.textSize = 16f
-        modeSwitch.setTextColor(textColor)
-        modeSwitch.isChecked = prefs.autoMode
-        modeSwitch.setOnCheckedChangeListener { _, checked ->
-            prefs.autoMode = checked
-            updateModeText(checked)
-        }
-        updateModeText(prefs.autoMode)
-        modeCard.addView(modeSwitch)
-        modeCard.addView(modeDesc)
-        modeCard.addView(
-            makeText("(این گزینه ذخیره می‌شود و در مرحله ترجمه اعمال می‌شود.)", 12f, dim)
+
+        val colorRow = LinearLayout(this)
+        colorRow.orientation = LinearLayout.HORIZONTAL
+        colorRow.layoutDirection = View.LAYOUT_DIRECTION_RTL
+        val crlp = LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT,
+            LinearLayout.LayoutParams.WRAP_CONTENT
         )
+        crlp.topMargin = dp(12)
+        colorRow.layoutParams = crlp
+
+        for (i in colorValues.indices) {
+            val chip = TextView(this)
+            chip.textSize = 15f
+            chip.setTextColor(Color.BLACK)
+            chip.typeface = Typeface.DEFAULT_BOLD
+            chip.gravity = Gravity.CENTER
+            val clp = LinearLayout.LayoutParams(0, dp(46), 1f)
+            clp.leftMargin = dp(4)
+            clp.rightMargin = dp(4)
+            chip.layoutParams = clp
+            chip.setOnClickListener {
+                prefs.textColor = colorValues[i]
+                refreshChips()
+                updatePreview()
+            }
+            chips.add(chip)
+            colorRow.addView(chip)
+        }
+        refreshChips()
+        colorCard.addView(colorRow)
+        root.addView(colorCard)
+
+        // نوع ترجمه
+        val modeCard = card()
+        modeCard.addView(makeText("نوع ترجمه", 16f, textColor))
+
+        val modeNames = listOf("ترجمه آنلاین", "ترجمه آفلاین", "هر دو")
+        // 0 = آفلاین ، 1 = آنلاین ، 2 = هر دو
+        val modeValues = listOf(1, 0, 2)
+        val modeViews = ArrayList<TextView>()
+
+        fun refreshModes() {
+            for (i in modeViews.indices) {
+                val selected = prefs.translationMode == modeValues[i]
+                val bg = GradientDrawable()
+                bg.cornerRadius = dp(14).toFloat()
+                if (selected) {
+                    bg.setColor(green)
+                    modeViews[i].setTextColor(Color.BLACK)
+                    modeViews[i].text = "✓  ${modeNames[i]}"
+                } else {
+                    bg.setColor(surface)
+                    bg.setStroke(dp(1), green)
+                    modeViews[i].setTextColor(green)
+                    modeViews[i].text = modeNames[i]
+                }
+                modeViews[i].background = bg
+            }
+        }
+
+        for (i in modeNames.indices) {
+            val opt = TextView(this)
+            opt.textSize = 16f
+            opt.gravity = Gravity.CENTER
+            opt.typeface = Typeface.DEFAULT_BOLD
+            val olp = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                dp(50)
+            )
+            olp.topMargin = dp(10)
+            opt.layoutParams = olp
+            opt.setOnClickListener {
+                prefs.translationMode = modeValues[i]
+                refreshModes()
+            }
+            modeViews.add(opt)
+            modeCard.addView(opt)
+        }
+        refreshModes()
+
+        val modeNote = makeText(
+            "ترجمه آنلاین به‌زودی فعال می‌شود. تا آن موقع ترجمه آفلاین کار می‌کند.",
+            12f,
+            dim
+        )
+        modeNote.setPadding(0, dp(10), 0, 0)
+        modeCard.addView(modeNote)
         root.addView(modeCard)
 
-        // مدل ترجمه
-        val modelCard = card()
-        modelCard.addView(makeText("مدل ترجمه انگلیسی به فارسی", 16f, textColor))
-        modelCard.addView(
-            makeText("وضعیت: هنوز دانلود نشده. دانلود مدل در مرحله ۵ اضافه می‌شود.", 13f, dim)
-        )
-        root.addView(modelCard)
-
-        // حافظه
-        root.addView(button("پاک کردن حافظه ترجمه", false) {
-            getSharedPreferences("translation_cache", MODE_PRIVATE).edit().clear().apply()
-            Toast.makeText(this, "حافظه ترجمه پاک شد", Toast.LENGTH_SHORT).show()
-        })
-
         // حریم خصوصی
-        root.addView(button("حریم خصوصی", false) {
-            AlertDialog.Builder(this)
-                .setTitle("حریم خصوصی")
-                .setMessage(
-                    "• برنامه هیچ اطلاعات شخصی جمع نمی‌کند.\n" +
-                    "• هیچ تبلیغ یا ردیاب ندارد.\n" +
-                    "• زیرنویس‌ها و تصویر صفحه به هیچ سرور بیرونی فرستاده نمی‌شوند.\n" +
-                    "• تنها استفاده از اینترنت، دانلود یک‌بار مدل ترجمه است."
-                )
-                .setPositiveButton("بستن", null)
-                .show()
-        })
+        val privacyCard = card()
+        privacyCard.addView(makeText("حریم خصوصی", 18f, green))
+        val privacyText = makeText(
+            "• این برنامه هیچ اطلاعات شخصی‌ای جمع نمی‌کند و حساب کاربری نمی‌خواهد.\n\n" +
+            "• هیچ تبلیغ، ردیاب یا ابزار آمارگیری ندارد.\n\n" +
+            "• تصویر صفحه فقط روی همین گوشی و به‌طور موقت برای خواندن زیرنویس استفاده می‌شود و هرگز ذخیره یا ارسال نمی‌شود.\n\n" +
+            "• ترجمه آفلاین کاملاً روی گوشی انجام می‌شود. تنها استفاده از اینترنت، دانلود یک‌بارهٔ مدل ترجمه است.\n\n" +
+            "• اگر ترجمه آنلاین را انتخاب کنی، فقط متن زیرنویس (نه تصویر صفحه) برای ترجمه فرستاده می‌شود.\n\n" +
+            "• با حذف برنامه، همه داده‌های آن از گوشی پاک می‌شود.",
+            14f,
+            textColor
+        )
+        privacyText.setPadding(0, dp(12), 0, 0)
+        privacyText.setLineSpacing(dp(2).toFloat(), 1.15f)
+        privacyCard.addView(privacyText)
+        root.addView(privacyCard)
 
-        root.addView(button("بازگشت", true) { finish() })
+        // بازگشت
+        val back = TextView(this)
+        back.text = "بازگشت"
+        back.textSize = 16f
+        back.gravity = Gravity.CENTER
+        back.setTextColor(Color.BLACK)
+        back.typeface = Typeface.DEFAULT_BOLD
+        val backBg = GradientDrawable()
+        backBg.setColor(green)
+        backBg.cornerRadius = dp(14).toFloat()
+        back.background = backBg
+        val blp = LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT,
+            dp(52)
+        )
+        blp.topMargin = dp(18)
+        back.layoutParams = blp
+        back.setOnClickListener { finish() }
+        root.addView(back)
 
         updatePreview()
     }
