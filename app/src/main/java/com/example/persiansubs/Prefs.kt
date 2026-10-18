@@ -1,6 +1,7 @@
 package com.example.persiansubs
 
 import android.content.Context
+import android.graphics.Color
 
 class Prefs(context: Context) {
     private val sp = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
@@ -16,4 +17,13 @@ class Prefs(context: Context) {
     var autoMode: Boolean
         get() = sp.getBoolean("auto_mode", true)
         set(value) = sp.edit().putBoolean("auto_mode", value).apply()
+
+    var textColor: Int
+        get() = sp.getInt("text_color", Color.WHITE)
+        set(value) = sp.edit().putInt("text_color", value).apply()
+
+    // 0 = آفلاین ، 1 = آنلاین ، 2 = هر دو
+    var translationMode: Int
+        get() = sp.getInt("translation_mode", 0)
+        set(value) = sp.edit().putInt("translation_mode", value).apply()
 }
