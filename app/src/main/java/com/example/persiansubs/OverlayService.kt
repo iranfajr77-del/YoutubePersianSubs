@@ -22,12 +22,14 @@ import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.provider.Settings
+import android.text.Html
 import android.util.DisplayMetrics
 import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
 import android.widget.TextView
+import android.widget.Toast
 import com.google.mlkit.common.model.DownloadConditions
 import com.google.mlkit.nl.translate.TranslateLanguage
 import com.google.mlkit.nl.translate.Translation
@@ -36,6 +38,12 @@ import com.google.mlkit.nl.translate.TranslatorOptions
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.TextRecognition
 import com.google.mlkit.vision.text.latin.TextRecognizerOptions
+import org.json.JSONObject
+import java.net.HttpURLConnection
+import java.net.URL
+import java.net.URLEncoder
+import java.util.concurrent.ExecutorService
+import java.util.concurrent.Executors
 
 class OverlayService : Service() {
 
@@ -53,9 +61,16 @@ class OverlayService : Service() {
     private var translator: Translator? = null
     private var modelReady = false
     private var translating = false
+
+    @Volatile
     private var lastSource = ""
     private var pendingSource: String? = null
     private val cache = LinkedHashMap<String, String>()
+
+    private val netExecutor: ExecutorService = Executors.newSingleThreadExecutor()
+    private val onlineCache = LinkedHashMap<String, String>()
+    private var onlineBlockedUntil = 0L
+    private var quotaToastShown = false
 
     private var screenW = 0
     private var screenH = 0
@@ -149,16 +164,96 @@ class OverlayService : Service() {
             }
     }
 
+    // نقطه ورود متن جدید: بر اساس نوع ترجمه (آفلاین / آنلاین / هر دو)
     private fun handleText(text: String) {
         if (text == lastSource) return
         lastSource = text
+        val mode = Prefs(this).translationMode
+        val canOnline = mode != 0 &&
+            System.currentTimeMillis() >= onlineBlockedUntil &&
+            text.toByteArray(Charsets.UTF_8).size <= 450
+        if (canOnline) {
+            val oc = onlineCache[text]
+            if (oc != null) {
+                box?.text = oc
+                return
+            }
+            requestOnline(text, mode == 1)
+            if (mode == 2) offlineFlow(text)
+            return
+        }
+        offlineFlow(text)
+    }
+
+    private fun requestOnline(text: String, fallbackToOffline: Boolean) {
+        netExecutor.execute {
+            if (text != lastSource) return@execute
+            var result: String? = null
+            var quota = false
+            try {
+                val q = URLEncoder.encode(text, "UTF-8")
+                val url = URL("https://api.mymemory.translated.net/get?q=" + q + "&langpair=en%7Cfa")
+                val c = url.openConnection() as HttpURLConnection
+                c.connectTimeout = 4000
+                c.readTimeout = 5000
+                val body: String? = try {
+                    val stream = if (c.responseCode in 200..299) c.inputStream else c.errorStream
+                    stream?.bufferedReader()?.use { it.readText() }
+                } finally {
+                    c.disconnect()
+                }
+                if (body != null) {
+                    val j = JSONObject(body)
+                    val status = j.optInt("responseStatus", 0)
+                    val t = j.optJSONObject("responseData")?.optString("translatedText", "") ?: ""
+                    if (t.startsWith("MYMEMORY WARNING") || status == 429) {
+                        quota = true
+                    } else if (status == 200 && t.isNotBlank()) {
+                        result = Html.fromHtml(t, Html.FROM_HTML_MODE_LEGACY).toString().trim()
+                    }
+                }
+            } catch (e: Exception) {
+            }
+            handler.post { onlineDone(text, result, quota, fallbackToOffline) }
+        }
+    }
+
+    private fun onlineDone(text: String, result: String?, quota: Boolean, fallbackToOffline: Boolean) {
+        if (stopping) return
+        if (!result.isNullOrEmpty()) {
+            onlineCache[text] = result
+            if (onlineCache.size > 200) {
+                val first = onlineCache.keys.first()
+                onlineCache.remove(first)
+            }
+            if (text == lastSource) box?.text = result
+            return
+        }
+        if (quota) {
+            onlineBlockedUntil = System.currentTimeMillis() + 3600000L
+            if (!quotaToastShown) {
+                quotaToastShown = true
+                Toast.makeText(
+                    this,
+                    "سهمیه ترجمه آنلاین امروز تمام شد؛ ترجمه آفلاین ادامه می‌دهد.",
+                    Toast.LENGTH_LONG
+                ).show()
+            }
+        } else {
+            onlineBlockedUntil = System.currentTimeMillis() + 30000L
+        }
+        if (fallbackToOffline && text == lastSource) offlineFlow(text)
+    }
+
+    // ترجمه آفلاین (ML Kit)
+    private fun offlineFlow(text: String) {
         if (!modelReady) {
-            box?.text = text
+            if (onlineCache[text] == null) box?.text = text
             return
         }
         val cached = cache[text]
         if (cached != null) {
-            box?.text = cached
+            if (text == lastSource && onlineCache[text] == null) box?.text = cached
             return
         }
         if (translating) {
@@ -179,11 +274,11 @@ class OverlayService : Service() {
                     val first = cache.keys.first()
                     cache.remove(first)
                 }
-                if (text == lastSource) box?.text = fa
+                if (text == lastSource && onlineCache[text] == null) box?.text = fa
             }
             .addOnFailureListener {
                 if (stopping) return@addOnFailureListener
-                if (text == lastSource) box?.text = text
+                if (text == lastSource && onlineCache[text] == null) box?.text = text
             }
             .addOnCompleteListener {
                 translating = false
@@ -192,7 +287,7 @@ class OverlayService : Service() {
                 if (p != null && !stopping) {
                     val c = cache[p]
                     if (c != null) {
-                        if (p == lastSource) box?.text = c
+                        if (p == lastSource && onlineCache[p] == null) box?.text = c
                     } else {
                         translate(p)
                     }
@@ -418,6 +513,7 @@ class OverlayService : Service() {
         stopping = true
         running = false
         handler.removeCallbacksAndMessages(null)
+        netExecutor.shutdownNow()
         try {
             virtualDisplay?.release()
         } catch (e: Exception) {
