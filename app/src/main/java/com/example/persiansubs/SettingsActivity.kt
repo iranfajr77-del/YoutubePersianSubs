@@ -5,8 +5,12 @@ import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
+import android.text.Editable
+import android.text.InputType
+import android.text.TextWatcher
 import android.view.Gravity
 import android.view.View
+import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.SeekBar
@@ -22,6 +26,7 @@ class SettingsActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         prefs = Prefs(this)
+        val rawPrefs = getSharedPreferences("settings", MODE_PRIVATE)
 
         val green = getColor(R.color.app_green)
         val black = getColor(R.color.app_black)
@@ -255,12 +260,49 @@ class SettingsActivity : Activity() {
         refreshModes()
 
         val modeNote = makeText(
-            "ترجمه آنلاین به‌زودی فعال می‌شود. تا آن موقع ترجمه آفلاین کار می‌کند.",
+            "ترجمه آنلاین با سرویس MyMemory انجام می‌شود و به اینترنت نیاز دارد. اگر اینترنت قطع باشد یا سهمیه روزانه تمام شود، ترجمه آفلاین جایگزین می‌شود.",
             12f,
             dim
         )
         modeNote.setPadding(0, dp(10), 0, 0)
         modeCard.addView(modeNote)
+
+        // ایمیل اختیاری
+        val emailLabel = makeText(
+            "ایمیل (اختیاری): با وارد کردن ایمیل، سهمیه روزانه ترجمه آنلاین از حدود ۵۰۰۰ به ۵۰۰۰۰ حرف می‌رسد.",
+            12f,
+            dim
+        )
+        emailLabel.setPadding(0, dp(14), 0, dp(6))
+        modeCard.addView(emailLabel)
+
+        val emailEdit = EditText(this)
+        emailEdit.setText(rawPrefs.getString("online_email", "") ?: "")
+        emailEdit.hint = "example@gmail.com"
+        emailEdit.setHintTextColor(dim)
+        emailEdit.setTextColor(textColor)
+        emailEdit.textSize = 15f
+        emailEdit.inputType =
+            InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS
+        emailEdit.textDirection = View.TEXT_DIRECTION_LTR
+        emailEdit.gravity = Gravity.START or Gravity.CENTER_VERTICAL
+        emailEdit.setSingleLine(true)
+        val ebg = GradientDrawable()
+        ebg.setColor(black)
+        ebg.cornerRadius = dp(12).toFloat()
+        ebg.setStroke(dp(1), greenDark)
+        emailEdit.background = ebg
+        emailEdit.setPadding(dp(12), dp(10), dp(12), dp(10))
+        emailEdit.addTextChangedListener(object : TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, st: Int, c: Int, a: Int) {}
+            override fun onTextChanged(s: CharSequence?, st: Int, b: Int, c: Int) {}
+            override fun afterTextChanged(s: Editable?) {
+                rawPrefs.edit()
+                    .putString("online_email", s?.toString()?.trim() ?: "")
+                    .apply()
+            }
+        })
+        modeCard.addView(emailEdit)
         root.addView(modeCard)
 
         // حریم خصوصی
@@ -270,8 +312,9 @@ class SettingsActivity : Activity() {
             "• این برنامه هیچ اطلاعات شخصی‌ای جمع نمی‌کند و حساب کاربری نمی‌خواهد.\n\n" +
             "• هیچ تبلیغ، ردیاب یا ابزار آمارگیری ندارد.\n\n" +
             "• تصویر صفحه فقط روی همین گوشی و به‌طور موقت برای خواندن زیرنویس استفاده می‌شود و هرگز ذخیره یا ارسال نمی‌شود.\n\n" +
-            "• ترجمه آفلاین کاملاً روی گوشی انجام می‌شود. تنها استفاده از اینترنت، دانلود یک‌بارهٔ مدل ترجمه است.\n\n" +
-            "• اگر ترجمه آنلاین را انتخاب کنی، فقط متن زیرنویس (نه تصویر صفحه) برای ترجمه فرستاده می‌شود.\n\n" +
+            "• ترجمه آفلاین کاملاً روی گوشی انجام می‌شود و تنها استفاده از اینترنت در آن، دانلود یک‌بارهٔ مدل ترجمه است.\n\n" +
+            "• اگر ترجمه آنلاین یا «هر دو» را انتخاب کنی، فقط متن زیرنویس خوانده‌شده (نه تصویر صفحه) برای ترجمه به سرویس MyMemory فرستاده می‌شود.\n\n" +
+            "• ایمیل اختیاری است. اگر وارد کنی، فقط همراه درخواست‌های ترجمه آنلاین به MyMemory می‌رسد و جای دیگری استفاده نمی‌شود.\n\n" +
             "• با حذف برنامه، همه داده‌های آن از گوشی پاک می‌شود.",
             14f,
             textColor
