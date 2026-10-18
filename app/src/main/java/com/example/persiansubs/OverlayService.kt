@@ -186,13 +186,19 @@ class OverlayService : Service() {
     }
 
     private fun requestOnline(text: String, fallbackToOffline: Boolean) {
+        val email = (getSharedPreferences("settings", MODE_PRIVATE)
+            .getString("online_email", "") ?: "").trim()
         netExecutor.execute {
             if (text != lastSource) return@execute
             var result: String? = null
             var quota = false
             try {
                 val q = URLEncoder.encode(text, "UTF-8")
-                val url = URL("https://api.mymemory.translated.net/get?q=" + q + "&langpair=en%7Cfa")
+                var address = "https://api.mymemory.translated.net/get?q=" + q + "&langpair=en%7Cfa"
+                if (email.contains("@") && email.length > 5) {
+                    address += "&de=" + URLEncoder.encode(email, "UTF-8")
+                }
+                val url = URL(address)
                 val c = url.openConnection() as HttpURLConnection
                 c.connectTimeout = 4000
                 c.readTimeout = 5000
