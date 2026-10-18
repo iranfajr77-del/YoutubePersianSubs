@@ -1,11 +1,12 @@
-
 package com.example.persiansubs
 
 import android.Manifest
 import android.app.Activity
+import android.app.AlertDialog
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Color
+import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.media.projection.MediaProjectionManager
 import android.net.Uri
@@ -14,9 +15,7 @@ import android.os.Bundle
 import android.provider.Settings
 import android.view.Gravity
 import android.view.View
-import android.widget.Button
 import android.widget.LinearLayout
-import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
 import com.google.mlkit.common.model.DownloadConditions
@@ -28,381 +27,163 @@ import com.google.mlkit.nl.translate.TranslatorOptions
 
 class MainActivity : Activity() {
 
-    private lateinit var overlayStatus: TextView
-    private lateinit var overlayButton: Button
-    private lateinit var transStatus: TextView
-    private lateinit var engineStatus: TextView
-    private lateinit var downloadButton: Button
-    private lateinit var mainButton: Button
+    private lateinit var mainButton: TextView
 
     private var downloading = false
     private var translationRunning = false
     private var waitingForCaptureConsent = false
+    private var startedAt = 0L
 
     private fun dp(v: Int): Int =
         (v * resources.displayMetrics.density).toInt()
+
+    private fun makeBox(label: String, filled: Boolean, size: Float): TextView {
+        val green = getColor(R.color.app_green)
+        val surface = getColor(R.color.app_surface)
+        val tv = TextView(this)
+        tv.text = label
+        tv.textSize = size
+        tv.gravity = Gravity.CENTER
+        tv.typeface = Typeface.DEFAULT_BOLD
+        val bg = GradientDrawable()
+        bg.cornerRadius = dp(18).toFloat()
+        if (filled) {
+            bg.setColor(green)
+            tv.setTextColor(Color.BLACK)
+        } else {
+            bg.setColor(surface)
+            bg.setStroke(dp(1), green)
+            tv.setTextColor(green)
+        }
+        tv.background = bg
+        return tv
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
         val green = getColor(R.color.app_green)
         val black = getColor(R.color.app_black)
-        val surface = getColor(R.color.app_surface)
-        val textColor = getColor(R.color.app_text)
         val dim = getColor(R.color.app_text_dim)
 
         window.statusBarColor = black
         window.navigationBarColor = black
 
-        val root = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            layoutDirection = View.LAYOUT_DIRECTION_RTL
-            setPadding(dp(20), dp(24), dp(20), dp(28))
-            setBackgroundColor(black)
-        }
+        val root = LinearLayout(this)
+        root.orientation = LinearLayout.VERTICAL
+        root.layoutDirection = View.LAYOUT_DIRECTION_RTL
+        root.setBackgroundColor(black)
+        root.setPadding(dp(24), dp(40), dp(24), dp(28))
+        setContentView(root)
 
-        val scroll = ScrollView(this)
-        scroll.setBackgroundColor(black)
-        scroll.addView(root)
-        setContentView(scroll)
+        // بالا: نام برنامه
+        val title = TextView(this)
+        title.text = "Mynisalto"
+        title.textSize = 32f
+        title.setTextColor(green)
+        title.typeface = Typeface.DEFAULT_BOLD
+        title.gravity = Gravity.CENTER
+        root.addView(title)
 
-        fun makeText(
-            value: String,
-            size: Float,
-            color: Int,
-            centered: Boolean = false
-        ): TextView {
-            return TextView(this).apply {
-                text = value
-                textSize = size
-                setTextColor(color)
-                textDirection = View.TEXT_DIRECTION_RTL
-                gravity = if (centered) {
-                    Gravity.CENTER
-                } else {
-                    Gravity.START
-                }
-                includeFontPadding = true
-            }
-        }
+        val subtitle = TextView(this)
+        subtitle.text = "زیرنویس فارسی یوتیوب"
+        subtitle.textSize = 16f
+        subtitle.setTextColor(dim)
+        subtitle.gravity = Gravity.CENTER
+        subtitle.textDirection = View.TEXT_DIRECTION_RTL
+        subtitle.setPadding(0, dp(6), 0, 0)
+        root.addView(subtitle)
 
-        fun card(): LinearLayout {
-            val background = GradientDrawable().apply {
-                setColor(surface)
-                cornerRadius = dp(18).toFloat()
-                setStroke(dp(1), getColor(R.color.app_green_dark))
-            }
-
-            return LinearLayout(this).apply {
-                orientation = LinearLayout.VERTICAL
-                background = background
-                setPadding(dp(16), dp(16), dp(16), dp(16))
-
-                layoutParams = LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.MATCH_PARENT,
-                    LinearLayout.LayoutParams.WRAP_CONTENT
-                ).apply {
-                    topMargin = dp(16)
-                }
-            }
-        }
-
-        fun makeButton(
-            label: String,
-            filled: Boolean,
-            onClick: () -> Unit
-        ): Button {
-            return Button(this).apply {
-                text = label
-                textSize = 15f
-                isAllCaps = false
-                minHeight = dp(52)
-                minimumHeight = dp(52)
-                setPadding(dp(12), dp(4), dp(12), dp(4))
-
-                val shape = GradientDrawable().apply {
-                    cornerRadius = dp(14).toFloat()
-
-                    if (filled) {
-                        setColor(green)
-                    } else {
-                        setColor(surface)
-                        setStroke(dp(1), green)
-                    }
-                }
-
-                background = shape
-                setTextColor(if (filled) Color.BLACK else green)
-
-                layoutParams = LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.MATCH_PARENT,
-                    dp(54)
-                ).apply {
-                    topMargin = dp(10)
-                }
-
-                setOnClickListener { onClick() }
-            }
-        }
-
-        // Header
-        root.addView(
-            makeText("Mynisalto", 30f, green, true).apply {
-                typeface = android.graphics.Typeface.DEFAULT_BOLD
-                setPadding(0, dp(4), 0, dp(4))
-            }
+        // وسط: دکمه بزرگ شروع / توقف
+        val middle = LinearLayout(this)
+        middle.orientation = LinearLayout.VERTICAL
+        middle.gravity = Gravity.CENTER
+        middle.layoutParams = LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT,
+            0,
+            1f
         )
 
-        root.addView(
-            makeText(
-                "زیرنویس فارسی یوتیوب",
-                16f,
-                dim,
-                true
-            ).apply {
-                setPadding(0, 0, 0, dp(8))
-            }
+        mainButton = makeBox("شروع", true, 28f)
+        mainButton.textDirection = View.TEXT_DIRECTION_RTL
+        mainButton.layoutParams = LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT,
+            dp(96)
         )
-
-        root.addView(
-            makeText(
-                "ویدیو رو ببین؛ ترجمه رو فارسی بخون.",
-                14f,
-                textColor,
-                true
-            ).apply {
-                setPadding(0, dp(4), 0, dp(10))
-            }
-        )
-
-        // Main start / stop button
-        mainButton = makeButton(
-            "▶  شروع ترجمه",
-            true
-        ) {
+        mainButton.setOnClickListener {
+            if (downloading || waitingForCaptureConsent) return@setOnClickListener
             if (translationRunning) {
                 onStopClicked()
-            } else if (!waitingForCaptureConsent) {
+            } else {
                 onStartClicked()
             }
-        }.apply {
-            textSize = 19f
-            typeface = android.graphics.Typeface.DEFAULT_BOLD
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                dp(66)
-            ).apply {
-                topMargin = dp(20)
-                bottomMargin = dp(4)
-            }
+        }
+        middle.addView(mainButton)
+        root.addView(middle)
+
+        // پایین: تنظیمات و درباره برنامه
+        val bottom = LinearLayout(this)
+        bottom.orientation = LinearLayout.HORIZONTAL
+        bottom.layoutDirection = View.LAYOUT_DIRECTION_RTL
+
+        val settingsBtn = makeBox("⚙  تنظیمات", false, 15f)
+        settingsBtn.textDirection = View.TEXT_DIRECTION_RTL
+        val slp = LinearLayout.LayoutParams(0, dp(54), 1f)
+        slp.leftMargin = dp(6)
+        slp.rightMargin = dp(6)
+        settingsBtn.layoutParams = slp
+        settingsBtn.setOnClickListener {
+            startActivity(Intent(this, SettingsActivity::class.java))
         }
 
-        root.addView(mainButton)
+        val aboutBtn = makeBox("درباره برنامه", false, 15f)
+        aboutBtn.textDirection = View.TEXT_DIRECTION_RTL
+        val alp = LinearLayout.LayoutParams(0, dp(54), 1f)
+        alp.leftMargin = dp(6)
+        alp.rightMargin = dp(6)
+        aboutBtn.layoutParams = alp
+        aboutBtn.setOnClickListener { showAbout() }
 
-        root.addView(
-            makeText(
-                "برای شروع، مجوزهای لازم را فعال کن.",
-                13f,
-                dim,
-                true
-            ).apply {
-                setPadding(0, dp(6), 0, dp(4))
-            }
-        )
+        bottom.addView(settingsBtn)
+        bottom.addView(aboutBtn)
+        root.addView(bottom)
 
-        // Status card
-        val statusCard = card()
-        statusCard.addView(
-            makeText("وضعیت برنامه", 18f, green)
-        )
-
-        overlayStatus = makeText("", 14f, textColor)
-        overlayStatus.setPadding(0, dp(12), 0, dp(4))
-        statusCard.addView(overlayStatus)
-
-        overlayButton = makeButton(
-            "فعال کردن مجوز نمایش روی برنامه‌ها",
-            false
-        ) {
-            openOverlaySettings()
-        }
-        statusCard.addView(overlayButton)
-
-        statusCard.addView(
-            makeText(
-                "خواندن زیرنویس صفحه",
-                14f,
-                textColor
-            ).apply {
-                setPadding(0, dp(12), 0, dp(4))
-            }
-        )
-
-        engineStatus = makeText(
-            "موتور ترجمه: در حال بررسی…",
-            14f,
-            dim
-        ).apply {
-            setPadding(0, dp(8), 0, dp(4))
-        }
-        statusCard.addView(engineStatus)
-
-        downloadButton = makeButton(
-            "دانلود مدل ترجمه (حدود ۶۰ مگابایت)",
-            false
-        ) {
-            downloadModel()
-        }
-        statusCard.addView(downloadButton)
-
-        transStatus = makeText(
-            "ترجمه: متوقف",
-            14f,
-            dim
-        ).apply {
-            setPadding(0, dp(12), 0, dp(2))
-        }
-        statusCard.addView(transStatus)
-
-        root.addView(statusCard)
-
-        // Instructions card
-        val helpCard = card()
-        helpCard.addView(
-            makeText("راهنمای استفاده", 18f, green)
-        )
-
-        val steps = makeText(
-            "۱. ابتدا مدل ترجمه را با اینترنت دانلود کن.\n\n" +
-            "۲. یوتیوب را باز کن و ویدیوت را پخش کن.\n\n" +
-            "۳. اگر ویدیو زیرنویس انگلیسی دارد، آن را روشن کن.\n\n" +
-            "۴. به Mynisalto برگرد و «شروع ترجمه» را بزن.\n\n" +
-            "۵. اجازه ضبط صفحه را تأیید کن و به یوتیوب برگرد.\n\n" +
-            "برای پایان کار، دکمه «توقف ترجمه» را بزن.",
-            14f,
-            textColor
-        ).apply {
-            setPadding(0, dp(12), 0, 0)
-            setLineSpacing(dp(2).toFloat(), 1.15f)
-        }
-
-        helpCard.addView(steps)
-        root.addView(helpCard)
-
-        root.addView(
-            makeButton("⚙  تنظیمات", false) {
-                startActivity(
-                    Intent(this, SettingsActivity::class.java)
-                )
-            }
-        )
+        refreshButton()
     }
 
     override fun onResume() {
         super.onResume()
-        refreshStatus()
-        refreshModelStatus()
-    }
-
-    private fun refreshStatus() {
-        val granted = Settings.canDrawOverlays(this)
-
-        if (granted) {
-            overlayStatus.text =
-                "مجوز نمایش روی برنامه‌ها: فعال  ✓"
-            overlayStatus.setTextColor(
-                getColor(R.color.app_green)
-            )
-            overlayButton.visibility = View.GONE
-        } else {
-            overlayStatus.text =
-                "مجوز نمایش روی برنامه‌ها: غیرفعال"
-            overlayStatus.setTextColor(
-                Color.parseColor("#FF6B6B")
-            )
-            overlayButton.visibility = View.VISIBLE
+        // بعد از شروع، چند ثانیه صبر می‌کنیم تا سرویس بالا بیاد
+        if (System.currentTimeMillis() - startedAt > 3000) {
+            translationRunning = OverlayService.running
         }
+        refreshButton()
     }
 
-    private fun setModelReady(ready: Boolean) {
-        if (ready) {
-            engineStatus.text = "موتور ترجمه: آماده  ✓"
-            engineStatus.setTextColor(
-                getColor(R.color.app_green)
-            )
-            downloadButton.visibility = View.GONE
-        } else {
-            engineStatus.text =
-                "موتور ترجمه: مدل دانلود نشده"
-            engineStatus.setTextColor(
-                Color.parseColor("#FF6B6B")
-            )
-            downloadButton.visibility = View.VISIBLE
+    private fun refreshButton() {
+        if (downloading) {
+            mainButton.text = "در حال دانلود مدل…"
+            mainButton.alpha = 0.6f
+            return
         }
+        mainButton.alpha = if (waitingForCaptureConsent) 0.6f else 1f
+        mainButton.text = if (translationRunning) "توقف" else "شروع"
     }
 
-    private fun refreshModelStatus() {
-        if (downloading) return
-
-        RemoteModelManager.getInstance()
-            .getDownloadedModels(TranslateRemoteModel::class.java)
-            .addOnSuccessListener { models ->
-                val ready = models.any {
-                    it.language == TranslateLanguage.PERSIAN
-                }
-                setModelReady(ready)
-            }
-            .addOnFailureListener {
-                setModelReady(false)
-            }
-    }
-
-    private fun downloadModel() {
-        if (downloading) return
-
-        downloading = true
-        downloadButton.isEnabled = false
-        engineStatus.text =
-            "مدل در حال دانلود است؛ لطفاً صبر کن…"
-        engineStatus.setTextColor(
-            getColor(R.color.app_text)
-        )
-
-        val options = TranslatorOptions.Builder()
-            .setSourceLanguage(TranslateLanguage.ENGLISH)
-            .setTargetLanguage(TranslateLanguage.PERSIAN)
-            .build()
-
-        val translator = Translation.getClient(options)
-
-        translator.downloadModelIfNeeded(
-            DownloadConditions.Builder().build()
-        ).addOnSuccessListener {
-            downloading = false
-            translator.close()
-            downloadButton.isEnabled = true
-            setModelReady(true)
-
-            Toast.makeText(
-                this,
-                "مدل ترجمه آماده شد.",
-                Toast.LENGTH_LONG
-            ).show()
-        }.addOnFailureListener { error ->
-            downloading = false
-            translator.close()
-            downloadButton.isEnabled = true
-            setModelReady(false)
-
-            engineStatus.text =
-                "دانلود ناموفق بود؛ اینترنت را بررسی کن."
-
-            Toast.makeText(
-                this,
-                "خطا: ${error.message ?: "نامشخص"}",
-                Toast.LENGTH_LONG
-            ).show()
-        }
+    private fun showAbout() {
+        AlertDialog.Builder(this)
+            .setTitle("درباره برنامه")
+            .setMessage(
+                "Mynisalto زیرنویس انگلیسی را از روی صفحه می‌خواند و آفلاین به فارسی ترجمه می‌کند.\n\n" +
+                "طرز استفاده:\n" +
+                "۱. در یوتیوب زیرنویس انگلیسی ویدیو را روشن کن.\n" +
+                "۲. «شروع» را بزن و اجازه ضبط صفحه را تأیید کن.\n" +
+                "۳. به یوتیوب برگرد؛ ترجمه در کادر شناور نمایش داده می‌شود.\n" +
+                "۴. برای پایان، به برنامه برگرد و «توقف» را بزن.\n\n" +
+                "توجه: ترجمه ماشینی کامل و بدون خطا نیست و ممکن است یک تا دو ثانیه تأخیر داشته باشد."
+            )
+            .setPositiveButton("بستن", null)
+            .show()
     }
 
     private fun openOverlaySettings() {
@@ -417,7 +198,7 @@ class MainActivity : Activity() {
         if (!Settings.canDrawOverlays(this)) {
             Toast.makeText(
                 this,
-                "ابتدا مجوز نمایش روی برنامه‌ها را فعال کن.",
+                "ابتدا مجوز «نمایش روی برنامه‌ها» را فعال کن، بعد برگرد و شروع را بزن.",
                 Toast.LENGTH_LONG
             ).show()
             openOverlaySettings()
@@ -435,8 +216,62 @@ class MainActivity : Activity() {
             )
         }
 
+        RemoteModelManager.getInstance()
+            .getDownloadedModels(TranslateRemoteModel::class.java)
+            .addOnSuccessListener { models ->
+                val ready = models.any {
+                    it.language == TranslateLanguage.PERSIAN
+                }
+                if (ready) {
+                    requestCapture()
+                } else {
+                    downloadModelThenStart()
+                }
+            }
+            .addOnFailureListener {
+                requestCapture()
+            }
+    }
+
+    private fun downloadModelThenStart() {
+        downloading = true
+        refreshButton()
+
+        Toast.makeText(
+            this,
+            "مدل ترجمه برای بار اول دانلود می‌شود (حدود ۶۰ مگابایت). اینترنت روشن باشد.",
+            Toast.LENGTH_LONG
+        ).show()
+
+        val options = TranslatorOptions.Builder()
+            .setSourceLanguage(TranslateLanguage.ENGLISH)
+            .setTargetLanguage(TranslateLanguage.PERSIAN)
+            .build()
+
+        val translator = Translation.getClient(options)
+
+        translator.downloadModelIfNeeded(
+            DownloadConditions.Builder().build()
+        ).addOnSuccessListener {
+            downloading = false
+            translator.close()
+            refreshButton()
+            requestCapture()
+        }.addOnFailureListener { error ->
+            downloading = false
+            translator.close()
+            refreshButton()
+            Toast.makeText(
+                this,
+                "دانلود مدل ناموفق بود. اینترنت را بررسی کن. (${error.message ?: "نامشخص"})",
+                Toast.LENGTH_LONG
+            ).show()
+        }
+    }
+
+    private fun requestCapture() {
         waitingForCaptureConsent = true
-        mainButton.isEnabled = false
+        refreshButton()
 
         val manager =
             getSystemService(MediaProjectionManager::class.java)
@@ -459,7 +294,6 @@ class MainActivity : Activity() {
         if (requestCode != REQ_CAPTURE) return
 
         waitingForCaptureConsent = false
-        mainButton.isEnabled = true
 
         if (resultCode == RESULT_OK && data != null) {
             val intent = Intent(this, OverlayService::class.java)
@@ -469,11 +303,7 @@ class MainActivity : Activity() {
             startForegroundService(intent)
 
             translationRunning = true
-            mainButton.text = "■  توقف ترجمه"
-            transStatus.text = "ترجمه: خواندن زیرنویس روشن است"
-            transStatus.setTextColor(
-                getColor(R.color.app_green)
-            )
+            startedAt = System.currentTimeMillis()
 
             Toast.makeText(
                 this,
@@ -482,7 +312,6 @@ class MainActivity : Activity() {
             ).show()
         } else {
             translationRunning = false
-            mainButton.text = "▶  شروع ترجمه"
 
             Toast.makeText(
                 this,
@@ -490,6 +319,7 @@ class MainActivity : Activity() {
                 Toast.LENGTH_LONG
             ).show()
         }
+        refreshButton()
     }
 
     private fun onStopClicked() {
@@ -499,12 +329,8 @@ class MainActivity : Activity() {
 
         translationRunning = false
         waitingForCaptureConsent = false
-
-        mainButton.text = "▶  شروع ترجمه"
-        transStatus.text = "ترجمه: متوقف"
-        transStatus.setTextColor(
-            getColor(R.color.app_text_dim)
-        )
+        startedAt = 0L
+        refreshButton()
     }
 
     companion object {
